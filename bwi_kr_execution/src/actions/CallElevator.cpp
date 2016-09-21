@@ -10,6 +10,19 @@
 #include "ros/console.h"
 #include "ros/ros.h"
 
+/*******************************************************
+*                   segbot_led Headers                 *
+********************************************************/
+#include "bwi_msgs/LEDActionResult.h"
+#include "bwi_msgs/LEDAnimations.h"
+#include "bwi_msgs/LEDClear.h"
+#include "bwi_msgs/LEDControlAction.h"
+
+/*******************************************************
+*                   Service Headers                    *
+********************************************************/
+#include "bwi_services/SpeakMessage.h"
+
 namespace bwi_krexec {
 
 CallElevator::CallElevator() :
@@ -18,21 +31,28 @@ CallElevator::CallElevator() :
             failed(false) {}
 
 struct IsFluentFacing {
- 
+
  bool operator() (const bwi_kr_execution::AspFluent& fluent) {
    return fluent.name == "facing";
  }
- 
+
 };
 
 void CallElevator::run() {
-  
+  ros::NodeHandle n;
+
+  ros::ServiceClient speak_message_client = n.serviceClient<bwi_services::SpeakMessage>("/speak_message_service/speak_message");
+  bwi_services::SpeakMessage speak_srv;
+
+  actionlib::SimpleActionClient<bwi_msgs::LEDControlAction> ac("led_control_server", true);
+  bwi_msgs::LEDControlGoal goal;
+
   if(!asked && !done) {
     std::string direction_text = (going_up) ? "up" : "down";
 
     // Get the doors for this elevator.
     std::vector<std::string> doors;
-    std::list<actasp::AspAtom> static_facts = StaticFacts::staticFacts(); 
+    std::list<actasp::AspAtom> static_facts = StaticFacts::staticFacts();
     BOOST_FOREACH(const actasp::AspAtom fact, static_facts) {
       if (fact.getName() == "elevhasdoor") {
         std::vector<std::string> params = fact.getParameters();
@@ -49,15 +69,14 @@ void CallElevator::run() {
     } else {
 
       // Figure out which of the doors we're facing.
-      ros::NodeHandle n;
       ros::ServiceClient krClient = n.serviceClient<bwi_kr_execution::CurrentStateQuery> ( "current_state_query" );
       krClient.waitForExistence();
 
       bwi_kr_execution::CurrentStateQuery csq;
 
       krClient.call(csq);
-  
-      std::vector<bwi_kr_execution::AspFluent>::const_iterator facingDoorIt = 
+
+      std::vector<bwi_kr_execution::AspFluent>::const_iterator facingDoorIt =
         find_if(csq.response.answer.fluents.begin(), csq.response.answer.fluents.end(), IsFluentFacing());
 
       if (facingDoorIt == csq.response.answer.fluents.end()) {
@@ -65,7 +84,7 @@ void CallElevator::run() {
         done = true;
         failed = true;
       } else {
-        facing_door = facingDoorIt->variables[0]; 
+        facing_door = facingDoorIt->variables[0];
         if (std::find(doors.begin(), doors.end(), facing_door) == doors.end()) {
           ROS_ERROR("CallElevator: Unable to ascertain which elevator door the robot is facing!");
           done = true;
@@ -74,11 +93,26 @@ void CallElevator::run() {
           // Make sure that this is one of the elevator doors.
           std::vector<std::string> door_is_open;
           door_is_open.push_back("Door is open");
-          askToCallElevator.reset(new CallGUI("askToCallElevator", 
-                                              CallGUI::CHOICE_QUESTION,  
-                                              "Could you call the elevator to go " + direction_text + 
-                                              ", and then let me know when the door in front of me opens?", 
-                                              120.0f, 
+
+          if (direction_text == "up")
+          {
+            goal.type.led_animations = bwi_msgs::LEDAnimations::UP;
+          }
+          else
+          {
+            goal.type.led_animations = bwi_msgs::LEDAnimations::DOWN;
+          }
+          goal.timeout = ros::Duration(0);
+          ac.sendGoal(goal);
+
+          speak_srv.request.message = "Could you call the elevator to go " + direction_text + ", and then let me know when the door in front of me opens?";
+          speak_message_client.call(speak_srv);
+
+          askToCallElevator.reset(new CallGUI("askToCallElevator",
+                                              CallGUI::CHOICE_QUESTION,
+                                              "Could you call the elevator to go " + direction_text +
+                                              ", and then let me know when the door in front of me opens?",
+                                              120.0f,
                                               door_is_open));
           askToCallElevator->run();
         }
@@ -102,6 +136,7 @@ void CallElevator::run() {
 
         krClient.call(uf);
 
+        ac.cancelGoal();
         CallGUI thanks("thanks", CallGUI::DISPLAY,  "Thanks! Would you mind helping me inside the elevator as well?");
         thanks.run();
       } else {
@@ -111,8 +146,8 @@ void CallElevator::run() {
       done = true;
     }
   }
- 
-  
+
+
 }
 
 bool CallElevator::hasFinished() const {

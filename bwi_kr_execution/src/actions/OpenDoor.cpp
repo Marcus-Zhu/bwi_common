@@ -1,6 +1,5 @@
 #include "OpenDoor.h"
 
-
 #include "CallGUI.h"
 #include "LogicalNavigation.h"
 
@@ -14,11 +13,24 @@
 
 #include <ros/ros.h>
 
+/*******************************************************
+*                   segbot_led Headers                 *
+********************************************************/
+#include "bwi_msgs/LEDActionResult.h"
+#include "bwi_msgs/LEDAnimations.h"
+#include "bwi_msgs/LEDClear.h"
+#include "bwi_msgs/LEDControlAction.h"
+
+/*******************************************************
+*                   Service Headers                    *
+********************************************************/
+#include "bwi_services/SpeakMessage.h"
+
 using namespace std;
 
 namespace bwi_krexec {
 
-OpenDoor::OpenDoor() : 
+OpenDoor::OpenDoor() :
             door(),
             done(false),
             asked(false),
@@ -26,61 +38,77 @@ OpenDoor::OpenDoor() :
             failed(false),
             startTime(){}
 
-  
+
 void OpenDoor::run() {
+  ros::NodeHandle n;
+
+  ros::ServiceClient speak_message_client = n.serviceClient<bwi_services::SpeakMessage>("/speak_message_service/speak_message");
+  bwi_services::SpeakMessage speak_srv;
+
+  actionlib::SimpleActionClient<bwi_msgs::LEDControlAction> ac("led_control_server", true);
+  bwi_msgs::LEDControlGoal goal;
+
   if(!asked) {
+    goal.type.led_animations = bwi_msgs::LEDAnimations::NEED_ASSIST;
+    goal.timeout = ros::Duration(0);
+    ac.sendGoal(goal);
+
+    speak_srv.request.message = "Can you open door " + door + ", please?";
+    speak_message_client.call(speak_srv);
+
     CallGUI askToOpen("askToOpen", CallGUI::DISPLAY,  "Can you open door " + door + ", please?");
     askToOpen.run();
     asked = true;
     startTime = ros::Time::now();
   }
-  
+
   if(!open) {
     vector<string> params;
     params.push_back(door);
     LogicalNavigation senseDoor("sensedoor",params);
-   
+
     senseDoor.run();
-    
+
     //check if door is open
-    ros::NodeHandle n;
     ros::ServiceClient currentClient = n.serviceClient<bwi_kr_execution::CurrentStateQuery> ( "current_state_query" );
-    
+
     bwi_kr_execution::AspFluent openFluent;
     openFluent.name = "open";
     openFluent.timeStep = 0;
     openFluent.variables.push_back(door);
-    
+
     bwi_kr_execution::AspRule rule;
     rule.head.push_back(openFluent);
-    
+
     bwi_kr_execution::CurrentStateQuery csq;
     csq.request.query.push_back(rule);
-    
+
     currentClient.call(csq);
-    
+
     open = csq.response.answer.satisfied;
-    
+
     if(!open && (ros::Time::now() - startTime) > ros::Duration(15.0)) {
       failed = true;
       done = true;
     }
-    
+
     ROS_DEBUG_STREAM( "door open: " << open );
   }
-  
+
   if(open) {
+    ac.cancelGoal();
+
     CallGUI askToOpen("thank", CallGUI::DISPLAY,  "Thanks!");
     askToOpen.run();
     done = true;
   }
 
-}  
-  
+}
+
 actasp::Action* OpenDoor::cloneAndInit(const actasp::AspFluent& fluent) const {
   OpenDoor *newAction = new OpenDoor();
   newAction->door = fluent.getParameters().at(0);
-  
+
   return newAction;
 }
 
@@ -92,5 +120,5 @@ std::vector<std::string> OpenDoor::getParameters() const {
 
 
 ActionFactory openDoorFactory(new OpenDoor(), false);
-  
+
 }
