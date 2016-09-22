@@ -12,6 +12,8 @@
 #include "bwi_kr_execution/AspFluent.h"
 
 #include <ros/ros.h>
+#include <actionlib/client/simple_action_client.h>
+#include <actionlib/client/terminal_state.h>
 
 /*******************************************************
 *                   segbot_led Headers                 *
@@ -42,10 +44,11 @@ OpenDoor::OpenDoor() :
 void OpenDoor::run() {
   ros::NodeHandle n;
 
-  ros::ServiceClient speak_message_client = n.serviceClient<bwi_services::SpeakMessage>("/speak_message_service/speak_message");
+  ros::ServiceClient speak_message_client = n.serviceClient<bwi_services::SpeakMessage>("/speak_message_service_node/speak_message");
   bwi_services::SpeakMessage speak_srv;
 
   actionlib::SimpleActionClient<bwi_msgs::LEDControlAction> ac("led_control_server", true);
+  ac.waitForServer();
   bwi_msgs::LEDControlGoal goal;
 
   if(!asked) {
@@ -96,7 +99,7 @@ void OpenDoor::run() {
   }
 
   if(open) {
-    ac.cancelGoal();
+    ac.cancelAllGoals();
 
     CallGUI askToOpen("thank", CallGUI::DISPLAY,  "Thanks!");
     askToOpen.run();

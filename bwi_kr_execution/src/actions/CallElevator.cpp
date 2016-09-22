@@ -9,6 +9,8 @@
 #include "bwi_kr_execution/UpdateFluents.h"
 #include "ros/console.h"
 #include "ros/ros.h"
+#include <actionlib/client/simple_action_client.h>
+#include <actionlib/client/terminal_state.h>
 
 /*******************************************************
 *                   segbot_led Headers                 *
@@ -41,10 +43,11 @@ struct IsFluentFacing {
 void CallElevator::run() {
   ros::NodeHandle n;
 
-  ros::ServiceClient speak_message_client = n.serviceClient<bwi_services::SpeakMessage>("/speak_message_service/speak_message");
+  ros::ServiceClient speak_message_client = n.serviceClient<bwi_services::SpeakMessage>("/speak_message_service_node/speak_message");
   bwi_services::SpeakMessage speak_srv;
 
   actionlib::SimpleActionClient<bwi_msgs::LEDControlAction> ac("led_control_server", true);
+  ac.waitForServer();
   bwi_msgs::LEDControlGoal goal;
 
   if(!asked && !done) {
@@ -136,7 +139,7 @@ void CallElevator::run() {
 
         krClient.call(uf);
 
-        ac.cancelGoal();
+        ac.cancelAllGoals();
         CallGUI thanks("thanks", CallGUI::DISPLAY,  "Thanks! Would you mind helping me inside the elevator as well?");
         thanks.run();
       } else {
